@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version:*)",
+      "Bash(pip show:*)",
+      "Bash(python:*)",
+      "Bash(py:*)",
+      "Bash(py -3.12:*)",
+      "Bash(py -3.11 --version:*)",
+      "Bash(venv/Scripts/pip install -r requirements.txt)",
+      "Bash(venv/Scripts/python -c \"import cv2, imagehash, customtkinter, PIL, numpy; print\\(''All imports OK''\\)\")",
+      "Bash(venv/Scripts/python -:*)",
+      "Bash(venv/Scripts/python organizer.py \"C:\\\\Users\\\\yossi.br\\\\OneDrive - Top Group\\\\Desktop\\\\test_photos\")",
+      "Bash(git init)",
+      "Bash(git add .gitignore CLAUDE.md detectors.py gui.py main.py organizer.py requirements.txt)",
+      "Bash(git commit:*)",
+      "Bash(git remote add origin https://github.com/yossi126/photo-organizer-poc.git)",
+      "Bash(git branch -M main)",
+      "Bash(git push -u origin main)"
+    ]
+  }
+}
