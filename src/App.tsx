@@ -9,7 +9,8 @@ import { useSidecar } from "./hooks/useSidecar";
 import { useScan } from "./hooks/useScan";
 import { useThumbnails } from "./hooks/useThumbnails";
 import { listPhotos, setRating, reclassify } from "./lib/sidecar";
-import type { Category, PhotoEntry, ScanThresholds } from "./types/photo";
+import { DEFAULT_EDIT_SETTINGS } from "./lib/constants";
+import type { Category, PhotoEntry, ScanThresholds, EditSettings } from "./types/photo";
 
 type Screen = "home" | "review";
 
@@ -25,6 +26,8 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<Category>("all");
   const [minStars, setMinStars] = useState(0);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [editSettingsMap, setEditSettingsMap] = useState<Record<string, EditSettings>>({});
+  const [clipboardSettings, setClipboardSettings] = useState<EditSettings | null>(null);
 
   const loadEntries = useCallback(async (path: string) => {
     try {
@@ -105,6 +108,28 @@ export default function App() {
     []
   );
 
+  const handleEditSettingsChange = useCallback(
+    (path: string, settings: EditSettings) => {
+      setEditSettingsMap((prev) => ({ ...prev, [path]: settings }));
+    },
+    []
+  );
+
+  const handleCopySettings = useCallback(
+    (path: string) => {
+      setClipboardSettings(editSettingsMap[path] ?? DEFAULT_EDIT_SETTINGS);
+    },
+    [editSettingsMap]
+  );
+
+  const handlePasteSettings = useCallback(
+    (path: string) => {
+      if (!clipboardSettings) return;
+      setEditSettingsMap((prev) => ({ ...prev, [path]: clipboardSettings }));
+    },
+    [clipboardSettings]
+  );
+
   const statusText = scanning
     ? `Scanning... ${progress?.current || 0}/${progress?.total || 0}`
     : summary
@@ -157,6 +182,9 @@ export default function App() {
             onStarsChange={setMinStars}
             onSelectPhoto={handleSelectPhoto}
             getThumbnail={thumbnails.get}
+            cacheVersion={thumbnails.cacheVersion}
+            getQueuedCount={thumbnails.getQueuedCount}
+            onRatingChange={handleRatingChange}
           />
         )}
         {activeTab === "edit" && (
@@ -168,6 +196,15 @@ export default function App() {
             onRatingChange={handleRatingChange}
             onReclassify={handleReclassify}
             getLargeImage={thumbnails.getLarge}
+            getThumbnail={thumbnails.get}
+            cacheVersion={thumbnails.cacheVersion}
+            activeCategory={activeCategory}
+            minStars={minStars}
+            editSettingsMap={editSettingsMap}
+            onEditSettingsChange={handleEditSettingsChange}
+            clipboardSettings={clipboardSettings}
+            onCopySettings={handleCopySettings}
+            onPasteSettings={handlePasteSettings}
           />
         )}
       </div>

@@ -1,4 +1,4 @@
-import type { Category } from "../types/photo";
+import type { Category, EditSettings } from "../types/photo";
 
 export const CATEGORY_CONFIG: Record<
   Category,
@@ -35,3 +35,44 @@ export const IMAGE_EXTENSIONS = new Set([
   ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf",
   ".orf", ".raf", ".rw2", ".pef", ".dng", ".raw",
 ]);
+
+export const DEFAULT_EDIT_SETTINGS: EditSettings = {
+  // Color Profile
+  colorProfile: "color",
+  // White Balance
+  wbPreset: "as-shot",
+  temperature: 5500,
+  tint: 0,
+  // Light
+  exposure: 0,
+  contrast: 0,
+  highlights: 0,
+  shadows: 0,
+  whites: 0,
+  blacks: 0,
+  // Presence
+  texture: 0,
+  clarity: 0,
+  dehaze: 0,
+  vibrance: 0,
+  saturation: 0,
+  // Detail
+  sharpenAmount: 40,
+  sharpenRadius: 1.0,
+  sharpenDetail: 25,
+  sharpenMasking: 0,
+  noiseReduceLuminance: 0,
+  noiseReduceColor: 25,
+  // HSL — all 24 fields
+  hslHueRed: 0,      hslHueOrange: 0,    hslHueYellow: 0,    hslHueGreen: 0,
+  hslHueAqua: 0,     hslHueBlue: 0,      hslHuePurple: 0,    hslHueMagenta: 0,
+  hslSatRed: 0,      hslSatOrange: 0,    hslSatYellow: 0,    hslSatGreen: 0,
+  hslSatAqua: 0,     hslSatBlue: 0,      hslSatPurple: 0,    hslSatMagenta: 0,
+  hslLumRed: 0,      hslLumOrange: 0,    hslLumYellow: 0,    hslLumGreen: 0,
+  hslLumAqua: 0,     hslLumBlue: 0,      hslLumPurple: 0,    hslLumMagenta: 0,
+  // Calibration
+  calShadowsTint: 0,
+  calRedHue: 0,      calRedSat: 0,
+  calGreenHue: 0,    calGreenSat: 0,
+  calBlueHue: 0,     calBlueSat: 0,
+};
