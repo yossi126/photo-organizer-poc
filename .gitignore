@@ -8,7 +8,6 @@ __pycache__/
 
 # PyInstaller output
 build/
-dist/
 *.spec
 
 # OS files
@@ -18,3 +17,14 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.vs/
+
+# Node
+node_modules/
+
+# Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Vite build output
+dist/
