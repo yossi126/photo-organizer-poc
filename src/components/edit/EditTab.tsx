@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { DEFAULT_EDIT_SETTINGS } from "../../lib/constants";
 import { EditTopBar } from "./EditTopBar";
 import { EditFilmstrip } from "./EditFilmstrip";
 import { EditRightPanel } from "./EditRightPanel";
+import { EditLeftPanel } from "./EditLeftPanel";
 import type { Category, PhotoEntry, EditSettings } from "../../types/photo";
 
 interface EditTabProps {
@@ -13,6 +14,7 @@ interface EditTabProps {
   onRatingChange: (entry: PhotoEntry, stars: number) => void;
   onReclassify: (entry: PhotoEntry, category: string) => void;
   getLargeImage: (path: string) => Promise<string>;
+  getFullResImage: (path: string) => Promise<string>;
   getThumbnail: (path: string) => string | null;
   cacheVersion?: number;
   activeCategory: Category;
@@ -27,28 +29,23 @@ interface EditTabProps {
 function buildCssFilter(s: EditSettings): string {
   const parts: string[] = [];
 
-  // Exposure + highlights/shadows approximation
   const brightnessBase = 1 + s.exposure * 0.2;
   const highlightAdj = s.highlights > 0 ? -s.highlights * 0.001 : 0;
   const shadowAdj = s.shadows > 0 ? s.shadows * 0.001 : 0;
   const brightness = Math.max(0.1, brightnessBase + highlightAdj + shadowAdj);
   parts.push(`brightness(${brightness.toFixed(3)})`);
 
-  // Contrast
   const contrast = 1 + s.contrast / 100;
   parts.push(`contrast(${Math.max(0, contrast).toFixed(3)})`);
 
-  // Clarity boosts contrast slightly
   if (s.clarity !== 0) {
     const clarityContrast = 1 + s.clarity / 200;
     parts.push(`contrast(${Math.max(0, clarityContrast).toFixed(3)})`);
   }
 
-  // Saturation (combined vibrance + saturation)
   const saturation = Math.max(0, 1 + s.saturation / 100 + s.vibrance / 150);
   parts.push(`saturate(${saturation.toFixed(3)})`);
 
-  // Temperature: center at 5500K
   if (s.temperature !== 5500) {
     const warmth = (s.temperature - 5500) / 44500;
     if (warmth > 0) {
@@ -58,18 +55,20 @@ function buildCssFilter(s: EditSettings): string {
     }
   }
 
-  // Tint: -150..+150 → hue-rotate
   if (s.tint !== 0) {
     parts.push(`hue-rotate(${(s.tint * 0.3).toFixed(1)}deg)`);
   }
 
-  // Noise reduction: blur for high luminance NR
   if (s.noiseReduceLuminance > 10) {
     parts.push(`blur(${(s.noiseReduceLuminance / 100).toFixed(2)}px)`);
   }
 
   return parts.join(" ");
 }
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 5;
+const ZOOM_STEP = 0.15;
 
 export function EditTab({
   entries,
@@ -79,6 +78,7 @@ export function EditTab({
   onRatingChange,
   onReclassify,
   getLargeImage,
+  getFullResImage,
   getThumbnail,
   cacheVersion,
   editSettingsMap,
@@ -88,6 +88,12 @@ export function EditTab({
   onPasteSettings,
 }: EditTabProps) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [showBefore, setShowBefore] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const previewRef = useRef<HTMLDivElement>(null);
   const entry = entries[selectedIndex];
 
   const currentSettings = useMemo(
@@ -100,14 +106,60 @@ export function EditTab({
   const loadImage = useCallback(async () => {
     if (!entry) return;
     setImageSrc(null);
-    const src = await getLargeImage(entry.path);
-    setImageSrc(src);
-  }, [entry?.path, getLargeImage]);
+    const preview = await getLargeImage(entry.path);
+    setImageSrc(preview);
+    const fullRes = await getFullResImage(entry.path);
+    setImageSrc(fullRes);
+  }, [entry?.path, getLargeImage, getFullResImage]);
 
   useEffect(() => {
     loadImage();
   }, [loadImage]);
 
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setShowBefore(false);
+  }, [selectedIndex]);
+
+  const zoomIn = useCallback(() => {
+    setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom((z) => {
+      const next = Math.max(MIN_ZOOM, z - ZOOM_STEP);
+      if (next <= 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Mouse wheel zoom
+  useEffect(() => {
+    const container = previewRef.current;
+    if (!container) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        setZoom((z) => Math.min(MAX_ZOOM, z + ZOOM_STEP));
+      } else {
+        setZoom((z) => {
+          const next = Math.max(MIN_ZOOM, z - ZOOM_STEP);
+          if (next <= 1) setPan({ x: 0, y: 0 });
+          return next;
+        });
+      }
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft" && selectedIndex > 0) {
@@ -116,11 +168,44 @@ export function EditTab({
         onIndexChange(selectedIndex + 1);
       } else if (e.key === "Escape") {
         onBack();
+      } else if (e.key === "+" || e.key === "=") {
+        zoomIn();
+      } else if (e.key === "-") {
+        zoomOut();
+      } else if (e.key === "0") {
+        resetZoom();
+      } else if (e.key === "\\") {
+        setShowBefore((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [selectedIndex, entries.length, onIndexChange, onBack]);
+  }, [selectedIndex, entries.length, onIndexChange, onBack, zoomIn, zoomOut, resetZoom]);
+
+  // Pan handlers
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (zoom <= 1) return;
+      e.preventDefault();
+      setIsPanning(true);
+      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    },
+    [zoom, pan]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStart.current.x;
+      const dy = e.clientY - panStart.current.y;
+      setPan({ x: panStart.current.panX + dx, y: panStart.current.panY + dy });
+    },
+    [isPanning]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+  }, []);
 
   if (!entry) {
     return (
@@ -133,22 +218,76 @@ export function EditTab({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Top bar */}
-      <EditTopBar filename={entry.filename} position={`${selectedIndex + 1} / ${entries.length}`} onBack={onBack} />
+      <EditTopBar
+        filename={entry.filename}
+        position={`${selectedIndex + 1} / ${entries.length}`}
+        onBack={onBack}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
+        stars={entry.starRating}
+        onRatingChange={(stars) => onRatingChange(entry, stars)}
+      />
 
-      {/* Main content area: preview + right panel */}
+      {/* Main content: left panel + preview + right panel */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Photo preview + filmstrip column */}
+        {/* Left panel — Presets / Snapshots / History */}
+        <EditLeftPanel
+          onSettingsChange={(settings) => onEditSettingsChange(entry.path, settings)}
+        />
+
+        {/* Center column: photo preview + filmstrip */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Photo preview */}
-          <div className="flex-1 flex flex-col items-center justify-center bg-zinc-950 p-4 relative">
+          <div
+            ref={previewRef}
+            className="flex-1 flex items-center justify-center bg-zinc-950 relative overflow-hidden select-none"
+            style={{ cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default" }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
             {imageSrc ? (
-              <img src={imageSrc} alt={entry.filename} className="max-w-full max-h-full object-contain rounded-lg" style={{ filter: cssFilter }} />
+              <img
+                src={imageSrc}
+                alt={entry.filename}
+                draggable={false}
+                className="object-contain rounded-lg"
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                  transformOrigin: "center center",
+                  filter: showBefore ? "none" : cssFilter,
+                  transition: isPanning ? "none" : "transform 0.1s ease-out",
+                }}
+              />
             ) : (
               <div className="text-zinc-600 text-sm">Loading preview...</div>
             )}
+
+            {/* Before/After badge */}
+            {(showBefore || cssFilter) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowBefore((prev) => !prev);
+                }}
+                title="Press \ to toggle before/after"
+                className={`absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold tracking-widest backdrop-blur-sm border transition-colors ${
+                  showBefore
+                    ? "bg-amber-500/90 border-amber-400 text-black"
+                    : "bg-emerald-600/90 border-emerald-500 text-white"
+                }`}
+              >
+                {showBefore ? "BEFORE" : "AFTER"}
+              </button>
+            )}
           </div>
 
-          {/* Filmstrip */}
+          {/* Filmstrip + status bar */}
           <EditFilmstrip
             entries={entries}
             selectedGlobalIndex={selectedIndex}
@@ -158,7 +297,7 @@ export function EditTab({
           />
         </div>
 
-        {/* Right panel with editing controls */}
+        {/* Right panel — editing controls */}
         <EditRightPanel
           entry={entry}
           settings={currentSettings}

@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import type { PhotoEntry } from "../../types/photo";
+import { CATEGORY_CONFIG } from "../../lib/constants";
 
 interface EditFilmstripProps {
   entries: PhotoEntry[];
@@ -19,47 +20,167 @@ export function EditFilmstrip({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll selected cell into view
+  // Auto-scroll selected thumbnail into view
   useEffect(() => {
     if (selectedRef.current && scrollContainerRef.current) {
       selectedRef.current.scrollIntoView({ inline: "center", behavior: "smooth" });
     }
   }, [selectedGlobalIndex, cacheVersion]);
 
-  return (
-    <div className="h-24 border-t border-zinc-700 bg-zinc-900 overflow-x-auto flex items-center" ref={scrollContainerRef}>
-      <div className="flex gap-1 px-2 py-2">
-        {entries.map((entry, globalIndex) => {
-          const thumbnailSrc = getThumbnail(entry.path);
-          const isSelected = globalIndex === selectedGlobalIndex;
+  const selectedEntry = entries[selectedGlobalIndex];
 
-          return (
-            <div
-              key={entry.path}
-              ref={isSelected ? selectedRef : undefined}
-              onClick={() => onSelectIndex(globalIndex)}
-              className={`flex-shrink-0 w-20 h-20 rounded border-2 overflow-hidden cursor-pointer transition-all ${
-                isSelected ? "border-blue-500 ring-2 ring-blue-400" : "border-zinc-700 hover:border-zinc-600"
-              }`}
-            >
-              {thumbnailSrc ? (
-                <div className="w-full h-full relative">
-                  <img src={thumbnailSrc} alt={entry.filename} className="w-full h-full object-cover" />
-                  {/* Star rating overlay */}
-                  {entry.starRating > 0 && (
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-xs text-amber-400">
-                      {"★".repeat(entry.starRating)}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-xs text-zinc-600">
-                  Loading...
-                </div>
-              )}
-            </div>
-          );
-        })}
+  return (
+    <div
+      style={{
+        borderTop: "1px solid #1e1e1e",
+        background: "#0d0d0d",
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+      }}
+    >
+      {/* Filmstrip row */}
+      <div
+        ref={scrollContainerRef}
+        style={{
+          height: 96,
+          overflowX: "auto",
+          overflowY: "hidden",
+          display: "flex",
+          alignItems: "center",
+          scrollbarWidth: "thin",
+          scrollbarColor: "#2a2a2a transparent",
+        }}
+      >
+        <div style={{ display: "flex", gap: 3, padding: "6px 8px" }}>
+          {entries.map((entry, globalIndex) => {
+            const thumbnailSrc = getThumbnail(entry.path);
+            const isSelected = globalIndex === selectedGlobalIndex;
+            const catConfig = CATEGORY_CONFIG[entry.category];
+            const isRejected =
+              entry.category !== "clean" && entry.category !== "all";
+
+            return (
+              <div
+                key={entry.path}
+                ref={isSelected ? selectedRef : undefined}
+                onClick={() => onSelectIndex(globalIndex)}
+                style={{
+                  flexShrink: 0,
+                  width: 78,
+                  height: 78,
+                  borderRadius: 3,
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  position: "relative",
+                  border: isSelected
+                    ? "2px solid #4a9eff"
+                    : "1px solid #2a2a2a",
+                  boxShadow: isSelected
+                    ? "0 0 0 1px rgba(74,158,255,0.3)"
+                    : "none",
+                  transition: "border-color 0.1s, box-shadow 0.1s",
+                  boxSizing: "border-box",
+                }}
+              >
+                {thumbnailSrc ? (
+                  <>
+                    <img
+                      src={thumbnailSrc}
+                      alt={entry.filename}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+
+                    {/* Rejection badge (colored dot top-left) */}
+                    {isRejected && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 3,
+                          left: 3,
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: catConfig.color,
+                          boxShadow: "0 0 3px rgba(0,0,0,0.8)",
+                        }}
+                      />
+                    )}
+
+                    {/* Star rating row at bottom */}
+                    {entry.starRating > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          background: "linear-gradient(transparent, rgba(0,0,0,0.75))",
+                          padding: "8px 3px 2px",
+                          display: "flex",
+                          gap: 1,
+                          justifyContent: "center",
+                        }}
+                      >
+                        {Array.from({ length: entry.starRating }).map((_, i) => (
+                          <span
+                            key={i}
+                            style={{ fontSize: 8, color: "#f0a500", lineHeight: 1 }}
+                          >
+                            ★
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      background: "#1a1a1a",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 9,
+                      color: "#444",
+                    }}
+                  >
+                    …
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div
+        style={{
+          height: 22,
+          borderTop: "1px solid #1a1a1a",
+          background: "#0a0a0a",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 12px",
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 11, color: "#555" }}>
+          {entries.length} photo{entries.length !== 1 ? "s" : ""} &bull; Develop Module
+        </span>
+        <span style={{ fontSize: 11, color: "#444", fontFamily: "monospace" }}>
+          {selectedEntry
+            ? selectedEntry.filename
+            : ""}
+        </span>
       </div>
     </div>
   );

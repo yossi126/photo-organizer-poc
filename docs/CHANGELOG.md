@@ -4,6 +4,45 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Feature] Lightroom-style Edit UI — 2026-03-02
+
+### Professional Develop Module (complete Edit tab redesign)
+
+The Edit tab has been redesigned from a basic panel layout into a full **Lightroom-style Develop Module** with a three-column layout, tabbed controls, live histogram, and a preset system.
+
+### New files
+
+- **`src/components/edit/EditLeftPanel.tsx`** — 200px left panel with a search bar, 8 one-click presets (Cinematic Warm, Moody Desaturated, Clean Portrait, Vivid Landscape, B&W Classic, Faded Film, High Contrast, Soft Pastel), and collapsible Snapshots / History sections.
+
+### Modified files
+
+| File | Changes |
+|---|---|
+| `src/index.css` | Added `.lr-slider` CSS class — 2px transparent track (real track is a `div`), circular 11px thumb, blue `#4a9eff` glow when adjusted, thin `.lr-panel-scroll` scrollbar for all panels |
+| `src/components/edit/panel/EditSlider.tsx` | Complete visual redesign: custom track `div` behind a transparent native `<input type="range">`; bipolar sliders fill from center outward; unipolar fill left-to-thumb; blue fill + monospace value display when adjusted |
+| `src/components/edit/panel/PanelSection.tsx` | Uppercase small-caps section titles with animated chevron; "Reset" text button on the right |
+| `src/components/edit/EditTopBar.tsx` | New **Library / Develop** module tabs (Library = back to grid); clickable gold 5-star rating inline with filename; zoom % badge; undo/redo placeholders; layout toggle icons |
+| `src/components/edit/EditFilmstrip.tsx` | Blue 2px border on selected thumbnail; colored category dot badges; star rating overlay; **status bar** below the strip showing `"N photos • Develop Module"` and current filename |
+| `src/components/edit/EditRightPanel.tsx` | Canvas-based **RGB histogram** at top (bell curves driven by `scores.brightness`); **BASIC / TONE CURVE / HSL/COLOR / DETAIL** tab bar; sections reorganised per tab; Photo Info moved inside BASIC (collapsed by default); Copy / Paste / Reset actions moved to bottom |
+| `src/components/edit/EditTab.tsx` | Wires in `EditLeftPanel`; passes `zoom`, `stars`, `onRatingChange` to `EditTopBar`; floating bottom zoom controls removed (zoom % now lives in the top bar) |
+
+### Preset system
+
+Clicking a preset in the left panel immediately applies a predefined `EditSettings` partial over `DEFAULT_EDIT_SETTINGS`. The active preset is highlighted with a blue left border.
+
+| Preset | Key adjustments |
+|---|---|
+| Cinematic Warm | +0.3 EV, +20 contrast, shadows +30, temp 6800K, vibrance +20 |
+| Moody Desaturated | −0.5 EV, +30 contrast, highlights −50, saturation −60 |
+| Clean Portrait | +0.2 EV, clarity +10, shadows +20, vibrance +15 |
+| Vivid Landscape | vibrance +50, saturation +20, shadows +40, clarity +25 |
+| B&W Classic | saturation −100, contrast +20, clarity +15 |
+| Faded Film | +0.5 EV, contrast −20, blacks +30 |
+| High Contrast | contrast +60, highlights −30, shadows −30, clarity +30 |
+| Soft Pastel | +0.8 EV, contrast −15, shadows +50, saturation −20 |
+
+---
+
 ## [Tauri Migration] — 2026-03-01
 
 ### Architecture: Tauri + React + TypeScript (complete rewrite of the UI)
