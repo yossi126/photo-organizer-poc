@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { DEFAULT_EDIT_SETTINGS } from "../../lib/constants";
+import { PhotoRenderer } from "../../lib/render/renderer";
 import { EditTopBar } from "./EditTopBar";
 import { EditFilmstrip } from "./EditFilmstrip";
 import { EditRightPanel } from "./EditRightPanel";
@@ -24,46 +25,12 @@ interface EditTabProps {
   clipboardSettings: EditSettings | null;
   onCopySettings: (path: string) => void;
   onPasteSettings: (path: string) => void;
-}
-
-function buildCssFilter(s: EditSettings): string {
-  const parts: string[] = [];
-
-  const brightnessBase = 1 + s.exposure * 0.2;
-  const highlightAdj = s.highlights > 0 ? -s.highlights * 0.001 : 0;
-  const shadowAdj = s.shadows > 0 ? s.shadows * 0.001 : 0;
-  const brightness = Math.max(0.1, brightnessBase + highlightAdj + shadowAdj);
-  parts.push(`brightness(${brightness.toFixed(3)})`);
-
-  const contrast = 1 + s.contrast / 100;
-  parts.push(`contrast(${Math.max(0, contrast).toFixed(3)})`);
-
-  if (s.clarity !== 0) {
-    const clarityContrast = 1 + s.clarity / 200;
-    parts.push(`contrast(${Math.max(0, clarityContrast).toFixed(3)})`);
-  }
-
-  const saturation = Math.max(0, 1 + s.saturation / 100 + s.vibrance / 150);
-  parts.push(`saturate(${saturation.toFixed(3)})`);
-
-  if (s.temperature !== 5500) {
-    const warmth = (s.temperature - 5500) / 44500;
-    if (warmth > 0) {
-      parts.push(`sepia(${(warmth * 0.5).toFixed(3)})`);
-    } else {
-      parts.push(`hue-rotate(${(warmth * 30).toFixed(1)}deg)`);
-    }
-  }
-
-  if (s.tint !== 0) {
-    parts.push(`hue-rotate(${(s.tint * 0.3).toFixed(1)}deg)`);
-  }
-
-  if (s.noiseReduceLuminance > 10) {
-    parts.push(`blur(${(s.noiseReduceLuminance / 100).toFixed(2)}px)`);
-  }
-
-  return parts.join(" ");
+  onUndo?: (path: string) => void;
+  onRedo?: (path: string) => void;
+  canUndo?: (path: string) => boolean;
+  canRedo?: (path: string) => boolean;
+  onExport?: (entry: PhotoEntry) => void;
+  onRevertEdit?: (entry: PhotoEntry) => void;
 }
 
 const MIN_ZOOM = 0.1;
@@ -86,14 +53,24 @@ export function EditTab({
   clipboardSettings,
   onCopySettings,
   onPasteSettings,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onExport,
+  onRevertEdit,
 }: EditTabProps) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [imageReady, setImageReady] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [showBefore, setShowBefore] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const previewRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<PhotoRenderer | null>(null);
+  const rafRef = useRef<number>(0);
   const entry = entries[selectedIndex];
 
   const currentSettings = useMemo(
@@ -101,11 +78,58 @@ export function EditTab({
     [entry?.path, editSettingsMap]
   );
 
-  const cssFilter = useMemo(() => buildCssFilter(currentSettings), [currentSettings]);
+  const hasEdits = entry ? entry.path in editSettingsMap : false;
+
+  // --- Renderer lifecycle ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    try {
+      rendererRef.current = new PhotoRenderer(canvas);
+    } catch (err) {
+      console.error("Failed to create WebGL renderer:", err);
+    }
+    return () => {
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
+  }, []);
+
+  // Upload image to the renderer whenever the source changes
+  useEffect(() => {
+    let cancelled = false;
+    const renderer = rendererRef.current;
+    if (!renderer || !imageSrc) return;
+    setImageReady(false);
+    renderer
+      .setImage(imageSrc)
+      .then(() => {
+        if (cancelled) return;
+        setImageReady(true);
+        renderer.render(showBefore ? DEFAULT_EDIT_SETTINGS : currentSettings);
+      })
+      .catch((err) => console.error("Failed to load image into renderer:", err));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageSrc]);
+
+  // Re-render on settings / before-after change (coalesced to one per frame)
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || !imageReady) return;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      renderer.render(showBefore ? DEFAULT_EDIT_SETTINGS : currentSettings);
+    });
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [currentSettings, showBefore, imageReady]);
 
   const loadImage = useCallback(async () => {
     if (!entry) return;
     setImageSrc(null);
+    setImageReady(false);
     const preview = await getLargeImage(entry.path);
     setImageSrc(preview);
     const fullRes = await getFullResImage(entry.path);
@@ -162,6 +186,17 @@ export function EditTab({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (!entry) return;
+        if (e.shiftKey) onRedo?.(entry.path);
+        else onUndo?.(entry.path);
+        return;
+      }
       if (e.key === "ArrowLeft" && selectedIndex > 0) {
         onIndexChange(selectedIndex - 1);
       } else if (e.key === "ArrowRight" && selectedIndex < entries.length - 1) {
@@ -180,7 +215,7 @@ export function EditTab({
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [selectedIndex, entries.length, onIndexChange, onBack, zoomIn, zoomOut, resetZoom]);
+  }, [selectedIndex, entries.length, onIndexChange, onBack, zoomIn, zoomOut, resetZoom, entry, onUndo, onRedo]);
 
   // Pan handlers
   const handleMouseDown = useCallback(
@@ -228,6 +263,11 @@ export function EditTab({
         onResetZoom={resetZoom}
         stars={entry.starRating}
         onRatingChange={(stars) => onRatingChange(entry, stars)}
+        onUndo={onUndo ? () => onUndo(entry.path) : undefined}
+        onRedo={onRedo ? () => onRedo(entry.path) : undefined}
+        canUndo={canUndo ? canUndo(entry.path) : false}
+        canRedo={canRedo ? canRedo(entry.path) : false}
+        onExport={onExport ? () => onExport(entry) : undefined}
       />
 
       {/* Main content: left panel + preview + right panel */}
@@ -235,6 +275,7 @@ export function EditTab({
         {/* Left panel — Presets / Snapshots / History */}
         <EditLeftPanel
           onSettingsChange={(settings) => onEditSettingsChange(entry.path, settings)}
+          currentSettings={currentSettings}
         />
 
         {/* Center column: photo preview + filmstrip */}
@@ -249,27 +290,51 @@ export function EditTab({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            {imageSrc ? (
-              <img
-                src={imageSrc}
-                alt={entry.filename}
-                draggable={false}
-                className="object-contain rounded-lg"
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: "100%",
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                  transformOrigin: "center center",
-                  filter: showBefore ? "none" : cssFilter,
-                  transition: isPanning ? "none" : "transform 0.1s ease-out",
-                }}
-              />
-            ) : (
-              <div className="text-zinc-600 text-sm">Loading preview...</div>
+            <canvas
+              ref={canvasRef}
+              className="object-contain rounded-lg"
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                transformOrigin: "center center",
+                transition: isPanning ? "none" : "transform 0.1s ease-out",
+                visibility: imageReady ? "visible" : "hidden",
+              }}
+            />
+            {!imageReady && (
+              <div className="absolute text-zinc-600 text-sm">Loading preview...</div>
+            )}
+
+            {/* AI-edited badge + revert */}
+            {currentSettings.aiEdited && (
+              <div
+                className="absolute top-4 right-4 flex items-center gap-1.5"
+                data-testid="ai-badge"
+              >
+                <span
+                  className="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-violet-700/90 border border-violet-500 text-white backdrop-blur-sm"
+                  title={`Auto-edited (scene: ${currentSettings.aiScene ?? "?"})`}
+                >
+                  ✨ AI{currentSettings.aiScene ? ` · ${currentSettings.aiScene}` : ""}
+                </span>
+                {onRevertEdit && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRevertEdit(entry);
+                    }}
+                    className="px-2 py-1 rounded-full text-[10px] font-medium bg-zinc-800/90 border border-zinc-600 text-zinc-300 hover:text-white hover:border-zinc-400 backdrop-blur-sm"
+                    title="Remove the AI edit and go back to the original"
+                  >
+                    Revert
+                  </button>
+                )}
+              </div>
             )}
 
             {/* Before/After badge */}
-            {(showBefore || cssFilter) && (
+            {(showBefore || hasEdits) && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();

@@ -8,6 +8,7 @@ interface ImportTabProps {
   progress: ScanProgress | null;
   logs: string[];
   onStartScan: (thresholds: ScanThresholds, dryRun: boolean) => void;
+  onCancelScan: () => void;
   onClear: () => void;
 }
 
@@ -17,6 +18,7 @@ export function ImportTab({
   progress,
   logs,
   onStartScan,
+  onCancelScan,
   onClear,
 }: ImportTabProps) {
   const [thresholds, setThresholds] = useState<ScanThresholds>({
@@ -98,6 +100,14 @@ export function ImportTab({
           >
             {scanning ? "Scanning..." : "Start Scan"}
           </button>
+          {scanning && (
+            <button
+              onClick={onCancelScan}
+              className="px-4 py-3 bg-red-900/60 hover:bg-red-800/70 border border-red-800 rounded-lg text-sm font-medium text-red-200 transition-colors"
+            >
+              Cancel
+            </button>
+          )}
           <button
             disabled={scanning}
             onClick={onClear}

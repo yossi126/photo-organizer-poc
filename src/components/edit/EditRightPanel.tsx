@@ -391,7 +391,7 @@ export function EditRightPanel({
         {/* ── TONE CURVE tab ── */}
         {activeTab === "toneCurve" && (
           <div style={{ padding: "12px" }}>
-            <CurvesSection />
+            <CurvesSection settings={settings} onSettingsChange={onSettingsChange} />
           </div>
         )}
 

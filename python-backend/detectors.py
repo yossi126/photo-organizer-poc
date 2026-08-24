@@ -65,14 +65,28 @@ def _load_pil(path: str) -> Image.Image:
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODEL_PATH = os.path.join(_SCRIPT_DIR, "face_landmarker.task")
-_face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
-    mp.tasks.vision.FaceLandmarkerOptions(
-        base_options=mp.tasks.BaseOptions(model_asset_path=_MODEL_PATH),
-        num_faces=5,
-        min_face_detection_confidence=0.5,
-        min_face_presence_confidence=0.5,
+try:
+    # Blendshapes give per-face expression scores (smile detection)
+    _face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
+        mp.tasks.vision.FaceLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=_MODEL_PATH),
+            num_faces=5,
+            min_face_detection_confidence=0.5,
+            min_face_presence_confidence=0.5,
+            output_face_blendshapes=True,
+        )
     )
-)
+    _blendshapes_enabled = True
+except Exception:
+    _face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(
+        mp.tasks.vision.FaceLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=_MODEL_PATH),
+            num_faces=5,
+            min_face_detection_confidence=0.5,
+            min_face_presence_confidence=0.5,
+        )
+    )
+    _blendshapes_enabled = False
 
 # ---------------------------------------------------------------------------
 # YuNet face detector — fallback for tilted/downward-looking faces that
@@ -119,6 +133,10 @@ class PhotoReport:
     # All detected issues + the primary (highest priority) category
     all_labels: list = field(default_factory=list)
     primary_category: Optional[str] = None
+
+    # Per-face quality records:
+    # [{bbox: [x, y, w, h] normalized 0-1, sharpness, ear, eyes_open, smile}]
+    faces: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -305,12 +323,15 @@ def has_closed_eyes(path: str, threshold: float = 0.18) -> bool:
 # YuNet fallback — crop detected faces and re-run MediaPipe
 # ---------------------------------------------------------------------------
 
-def _yunet_fallback(img_bgr: np.ndarray, orig_w: int, orig_h: int) -> list:
+def _yunet_fallback(img_bgr: np.ndarray, orig_w: int, orig_h: int,
+                    blendshapes_out: list = None) -> list:
     """
     Use YuNet to detect faces, crop each face with padding, and re-run
     MediaPipe FaceLandmarker on the crop.  Returns a list of face landmark
     lists (same format as MediaPipe's face_landmarks) so the caller can
     use them for EAR and blur ROI just like normal detections.
+    If blendshapes_out is given, the matching blendshape lists (or None) are
+    appended to it, aligned with the returned landmark lists.
 
     The trick: MediaPipe often fails on full-frame images when the head is
     tilted, but succeeds on a tight crop where the face dominates the frame.
@@ -350,7 +371,8 @@ def _yunet_fallback(img_bgr: np.ndarray, orig_w: int, orig_h: int) -> list:
             result = _face_landmarker.detect(mp_image)
 
             if result.face_landmarks:
-                for face_lm in result.face_landmarks:
+                result_blend = getattr(result, "face_blendshapes", None) or []
+                for k, face_lm in enumerate(result.face_landmarks):
                     # Remap landmark coordinates from crop-space to
                     # full-image-space (normalized 0-1 relative to original)
                     remapped = []
@@ -361,10 +383,58 @@ def _yunet_fallback(img_bgr: np.ndarray, orig_w: int, orig_h: int) -> list:
                         new_lm.z = lm.z
                         remapped.append(new_lm)
                     all_landmarks.append(remapped)
+                    if blendshapes_out is not None:
+                        blendshapes_out.append(
+                            result_blend[k] if k < len(result_blend) else None
+                        )
 
         return all_landmarks
     except Exception:
         return []
+
+
+def _smile_score(blendshapes) -> Optional[float]:
+    """Mean of mouthSmileLeft/Right blendshape scores (0..1), or None."""
+    if not blendshapes:
+        return None
+    vals = [c.score for c in blendshapes
+            if c.category_name in ("mouthSmileLeft", "mouthSmileRight")]
+    return round(float(np.mean(vals)), 3) if vals else None
+
+
+def _face_records(gray_norm: np.ndarray, face_landmarks: list,
+                  face_blendshapes: list, img_w: int, img_h: int,
+                  ear_th: float) -> list:
+    """Per-face quality records for the face_results table."""
+    records = []
+    h, w = gray_norm.shape
+    for k, face_lm in enumerate(face_landmarks):
+        xs = [lm.x for lm in face_lm]
+        ys = [lm.y for lm in face_lm]
+        x1n, x2n = max(0.0, min(xs)), min(1.0, max(xs))
+        y1n, y2n = max(0.0, min(ys)), min(1.0, max(ys))
+
+        # Face-crop sharpness (Laplacian variance on the CLAHE image)
+        x1, x2 = int(x1n * w), int(x2n * w)
+        y1, y2 = int(y1n * h), int(y2n * h)
+        roi = gray_norm[y1:y2, x1:x2]
+        sharpness = float(cv2.Laplacian(roi, cv2.CV_64F).var()) if roi.size > 100 else None
+
+        left = _eye_aspect_ratio(face_lm, _LEFT_EYE_TOP, _LEFT_EYE_TOP2, _LEFT_EYE_SIDES)
+        right = _eye_aspect_ratio(face_lm, _RIGHT_EYE_TOP, _RIGHT_EYE_TOP2, _RIGHT_EYE_SIDES)
+        ear = round(min(left, right), 4)
+        eyes_open = not (left < ear_th and right < ear_th)
+
+        blend = face_blendshapes[k] if k < len(face_blendshapes) else None
+        records.append({
+            "bbox": [round(x1n, 4), round(y1n, 4),
+                     round(x2n - x1n, 4), round(y2n - y1n, 4)],
+            "sharpness": round(sharpness, 1) if sharpness is not None else None,
+            "ear": ear,
+            "eyes_open": eyes_open,
+            "smile": _smile_score(blend),
+        })
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +472,7 @@ def analyze_photo(path: str, thresholds: dict = None) -> PhotoReport:
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.array(pil_img))
         face_result = _face_landmarker.detect(mp_image)
         face_landmarks = face_result.face_landmarks or []
+        face_blendshapes = list(getattr(face_result, "face_blendshapes", None) or [])
 
         # YuNet fallback: if MediaPipe found no faces, try YuNet which
         # handles tilted/downward-looking faces much better.  When YuNet
@@ -409,7 +480,8 @@ def analyze_photo(path: str, thresholds: dict = None) -> PhotoReport:
         # MediaPipe on the crop — this often succeeds because the face
         # fills more of the frame.
         if not face_landmarks and _yunet_available:
-            face_landmarks = _yunet_fallback(img_bgr, w, h)
+            face_blendshapes = []
+            face_landmarks = _yunet_fallback(img_bgr, w, h, blendshapes_out=face_blendshapes)
 
         report.faces_detected = len(face_landmarks)
 
@@ -433,6 +505,14 @@ def analyze_photo(path: str, thresholds: dict = None) -> PhotoReport:
                     min_ear = min(min_ear, left_ear, right_ear)
             if min_ear < float("inf"):
                 report.eye_aspect_ratio = min_ear
+
+        # Per-face quality records (for the face_results table)
+        if face_landmarks:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray_norm = clahe.apply(gray)
+            report.faces = _face_records(
+                gray_norm, face_landmarks, face_blendshapes, w, h, ear_th
+            )
 
         # Set boolean flags
         report.is_dark = report.brightness_mean < dark_th

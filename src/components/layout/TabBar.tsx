@@ -1,6 +1,8 @@
 interface TabBarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  projectName?: string;
+  onBackToProjects?: () => void;
 }
 
 const TABS = [
@@ -9,9 +11,18 @@ const TABS = [
   { id: "edit", label: "EDIT" },
 ];
 
-export function TabBar({ activeTab, onTabChange }: TabBarProps) {
+export function TabBar({ activeTab, onTabChange, projectName, onBackToProjects }: TabBarProps) {
   return (
-    <div className="flex bg-zinc-900 border-b border-zinc-800">
+    <div className="flex bg-zinc-900 border-b border-zinc-800 items-center">
+      {onBackToProjects && (
+        <button
+          onClick={onBackToProjects}
+          title="Back to projects"
+          className="px-4 py-3 text-sm text-zinc-500 hover:text-zinc-200 transition-colors border-r border-zinc-800"
+        >
+          ←
+        </button>
+      )}
       {TABS.map((tab) => (
         <button
           key={tab.id}
@@ -27,6 +38,11 @@ export function TabBar({ activeTab, onTabChange }: TabBarProps) {
           )}
         </button>
       ))}
+      {projectName && (
+        <div className="ml-auto px-4 text-xs text-zinc-500 truncate max-w-64">
+          {projectName}
+        </div>
+      )}
     </div>
   );
 }

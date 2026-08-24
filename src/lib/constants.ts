@@ -75,4 +75,9 @@ export const DEFAULT_EDIT_SETTINGS: EditSettings = {
   calRedHue: 0,      calRedSat: 0,
   calGreenHue: 0,    calGreenSat: 0,
   calBlueHue: 0,     calBlueSat: 0,
+  // Tone curve (identity)
+  toneCurve: [[0, 0], [1, 1]],
+  toneCurveRed: [[0, 0], [1, 1]],
+  toneCurveGreen: [[0, 0], [1, 1]],
+  toneCurveBlue: [[0, 0], [1, 1]],
 };

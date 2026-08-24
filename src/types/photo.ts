@@ -2,15 +2,33 @@ export interface PhotoScores {
   brightness: number;
   blur: number;
   ear: number | null;
+  aesthetic?: number | null;
+  faceQuality?: number | null;
+  combined?: number | null;
 }
 
+export type PhotoFlag = "pick" | "reject" | null;
+
 export interface PhotoEntry {
+  id: number;
   filename: string;
   path: string;
   category: Category;
   allLabels: string[];
   scores: PhotoScores;
   starRating: number;
+  ratingSource?: string;
+  stackId?: number | null;
+  isStackTop?: boolean;
+  flag?: PhotoFlag;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  folder: string;
+  createdAt: number;
+  lastOpenedAt: number;
 }
 
 export type Category =
@@ -35,6 +53,9 @@ export interface ScanSummary {
   _blurry: number;
   _eyes_closed: number;
   clean: number;
+  skipped?: number;
+  stacks?: number;
+  picks?: number;
 }
 
 export interface ScanThresholds {
@@ -105,4 +126,15 @@ export interface EditSettings {
   calRedHue: number;      calRedSat: number;
   calGreenHue: number;    calGreenSat: number;
   calBlueHue: number;     calBlueSat: number;
+
+  // Tone curve — [x, y] points in [0,1], x strictly increasing, >= 2 points.
+  // Default [[0,0],[1,1]] (identity). See docs/render-pipeline.md Stage 3.
+  toneCurve: [number, number][];
+  toneCurveRed: [number, number][];
+  toneCurveGreen: [number, number][];
+  toneCurveBlue: [number, number][];
+
+  // Set by the auto-edit engine (Phase 4) — not a render parameter
+  aiEdited?: boolean;
+  aiScene?: string;
 }

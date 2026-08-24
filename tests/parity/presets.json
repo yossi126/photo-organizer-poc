@@ -1,0 +1,44 @@
+{
+  "defaults": {},
+  "wb-warm": {
+    "temperature": 8000,
+    "tint": 30
+  },
+  "tone-heavy": {
+    "exposure": 1.2,
+    "contrast": 40,
+    "highlights": -60,
+    "shadows": 50,
+    "whites": 20,
+    "blacks": -30
+  },
+  "curve-presence": {
+    "toneCurve": [[0, 0.05], [0.25, 0.18], [0.75, 0.85], [1, 0.98]],
+    "texture": 50,
+    "clarity": 40,
+    "dehaze": 30
+  },
+  "hsl-cal": {
+    "hslHueRed": 60,
+    "hslSatOrange": -50,
+    "hslLumYellow": 40,
+    "hslHueBlue": -60,
+    "hslSatAqua": 70,
+    "hslLumGreen": -40,
+    "calRedHue": 50,
+    "calGreenSat": -50,
+    "calBlueHue": -50,
+    "calShadowsTint": 40,
+    "vibrance": 40,
+    "saturation": -20
+  },
+  "detail-nr": {
+    "sharpenAmount": 100,
+    "sharpenRadius": 2.0,
+    "sharpenDetail": 60,
+    "sharpenMasking": 40,
+    "noiseReduceLuminance": 50,
+    "noiseReduceColor": 60,
+    "colorProfile": "vivid"
+  }
+}

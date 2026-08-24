@@ -5,3 +5,9 @@ numpy
 onnxruntime
 mediapipe
 rawpy
+platformdirs
+pillow-heif
+# Training only (personal AI profile) — inference needs onnxruntime alone
+torch
+onnx
+onnxscript

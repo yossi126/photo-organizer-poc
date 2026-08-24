@@ -10,6 +10,11 @@ interface EditTopBarProps {
   onResetZoom: () => void;
   stars: number;
   onRatingChange: (stars: number) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onExport?: () => void;
 }
 
 export function EditTopBar({
@@ -20,6 +25,11 @@ export function EditTopBar({
   onResetZoom,
   stars,
   onRatingChange,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  onExport,
 }: EditTopBarProps) {
   const zoomPct = Math.round(zoom * 100);
   const [hoverStar, setHoverStar] = useState(0);
@@ -83,33 +93,37 @@ export function EditTopBar({
         }}
       />
 
-      {/* Undo / Redo (non-functional decorative buttons) */}
+      {/* Undo / Redo */}
       <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
         <button
+          onClick={canUndo ? onUndo : undefined}
+          disabled={!canUndo}
           style={{
             fontSize: 14,
-            color: "#444",
+            color: canUndo ? "#aaa" : "#444",
             background: "none",
             border: "none",
-            cursor: "not-allowed",
+            cursor: canUndo ? "pointer" : "not-allowed",
             padding: "2px 5px",
             lineHeight: 1,
           }}
-          title="Undo"
+          title="Undo (Ctrl+Z)"
         >
           ↩
         </button>
         <button
+          onClick={canRedo ? onRedo : undefined}
+          disabled={!canRedo}
           style={{
             fontSize: 14,
-            color: "#444",
+            color: canRedo ? "#aaa" : "#444",
             background: "none",
             border: "none",
-            cursor: "not-allowed",
+            cursor: canRedo ? "pointer" : "not-allowed",
             padding: "2px 5px",
             lineHeight: 1,
           }}
-          title="Redo"
+          title="Redo (Ctrl+Shift+Z)"
         >
           ↪
         </button>
@@ -221,6 +235,25 @@ export function EditTopBar({
         </button>
 
         <div style={{ width: 1, height: 16, background: "#2a2a2a" }} />
+
+        {onExport && (
+          <button
+            onClick={onExport}
+            style={{
+              fontSize: 11,
+              color: "#ddd",
+              background: "#2563eb",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px 10px",
+              borderRadius: 4,
+              fontWeight: 500,
+            }}
+            title="Export this photo"
+          >
+            Export
+          </button>
+        )}
 
         <button
           style={{

@@ -1,0 +1,20 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.0">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   crs:Version="6.7"
+   crs:ProcessVersion="5.7"
+   crs:Exposure="+0.50"
+   crs:Brightness="+50"
+   crs:Contrast="+25"
+   crs:Shadows="5"
+   crs:HighlightRecovery="23"
+   crs:FillLight="10"
+   crs:Temperature="5300"
+   crs:Tint="-5"
+   crs:Vibrance="+15"
+   crs:Sharpness="40"
+   crs:HasSettings="True">
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
