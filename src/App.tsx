@@ -18,6 +18,10 @@ import {
   setFlag,
   saveEditSettings,
   deleteEditSettings,
+  autoEdit,
+  getAiProfile,
+  getEditSettings,
+  personalModelStatus,
 } from "./lib/sidecar";
 import { DEFAULT_EDIT_SETTINGS } from "./lib/constants";
 import type {
@@ -157,6 +161,36 @@ export default function App() {
       pendingSaves.current.delete(entry.path);
     },
     []
+  );
+
+  const handleAutoEditSingle = useCallback(
+    async (entry: PhotoEntry) => {
+      if (!currentProject) return;
+      const [profile, modelStatus] = await Promise.all([
+        getAiProfile(),
+        personalModelStatus().catch(() => null),
+      ]);
+      const config = {
+        ...profile.config,
+        skipEdited: false,
+        usePersonalModel:
+          (profile.config.usePersonalModel ?? true) && !!modelStatus?.usable,
+      };
+      await autoEdit(currentProject.id, [entry.id], config, () => {});
+      const settings = await getEditSettings(entry.id);
+      if (!settings) return;
+      history.seed(entry.path, editSettingsMap[entry.path] ?? DEFAULT_EDIT_SETTINGS);
+      setEditSettingsMap((prev) => ({
+        ...prev,
+        [entry.path]: { ...DEFAULT_EDIT_SETTINGS, ...settings },
+      }));
+      // Drop any pending debounced save so stale settings don't overwrite the AI result
+      const timer = editSaveTimers.current.get(entry.path);
+      if (timer) clearTimeout(timer);
+      editSaveTimers.current.delete(entry.path);
+      pendingSaves.current.delete(entry.path);
+    },
+    [currentProject, history, editSettingsMap]
   );
 
   const handleFlagChange = useCallback(
@@ -357,6 +391,7 @@ export default function App() {
             canRedo={history.canRedo}
             onExport={(entry) => setExportPhotosList([entry])}
             onRevertEdit={handleRevertEdit}
+            onAutoEditSingle={handleAutoEditSingle}
           />
         )}
       </div>

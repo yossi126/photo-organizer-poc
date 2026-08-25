@@ -330,6 +330,11 @@ function handleMockRequest(
       }
       break;
     }
+    case "get_edit_settings": {
+      const fresh = loadMockCatalog();
+      onMessage({ id, result: { settings: fresh.editSettings[params.photo_id as number] ?? null } });
+      break;
+    }
     case "set_edit_settings": {
       cat.editSettings[params.photo_id as number] = params.settings as EditSettings;
       saveMockCatalog(cat);
@@ -1057,6 +1062,15 @@ export function deleteEditSettings(photoId: number): Promise<void> {
   return new Promise((resolve, reject) => {
     sendRequest("delete_edit_settings", { photo_id: photoId }, (msg) => {
       if (msg.result) resolve();
+      else if (msg.error) reject(new Error(msg.error));
+    });
+  });
+}
+
+export function getEditSettings(photoId: number): Promise<EditSettings | null> {
+  return new Promise((resolve, reject) => {
+    sendRequest("get_edit_settings", { photo_id: photoId }, (msg) => {
+      if (msg.result) resolve((msg.result as { settings: EditSettings | null }).settings);
       else if (msg.error) reject(new Error(msg.error));
     });
   });

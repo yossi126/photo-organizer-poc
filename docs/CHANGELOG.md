@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Feature] Single-image Auto Edit + home screen refresh — 2026-08-24
+
+### Single-image Auto Edit (Develop view)
+
+A photo with no AI edit (never auto-edited, or reverted) now shows a **✨ Auto Edit** pill in the top-right badge spot of the EDIT tab. One click runs the auto-edit engine on just that photo using the saved AI Profile (scene presets, personal model when trained) — no dialog. After it runs, the pill swaps to the existing "AI · scene" badge + Revert. The run is undoable and errors show inline.
+
+| File | Changes |
+|---|---|
+| `python-backend/sidecar.py` | New `get_edit_settings` JSON-RPC command returning one photo's catalog settings |
+| `src/lib/sidecar.ts` | `getEditSettings()` RPC + browser-mock case |
+| `src/App.tsx` | `handleAutoEditSingle` — loads AI profile + personal-model status, runs `auto_edit` with `skipEdited: false` for the single photo, fetches the result, seeds undo history, clears pending debounced saves |
+| `src/components/edit/EditTab.tsx` | `onAutoEditSingle` prop; Auto Edit pill with busy/error states, error clears on photo switch |
+
+Plan: `docs/plans/single-image-auto-edit/plan.md`.
+
+### Home screen polish + motion
+
+- Emoji replaced with a consistent SVG icon set (aperture mark, plus/spark/folder/trash); AI Profile demoted to secondary button.
+- Skeleton loading rows, dashed empty state, alert-style errors, focus rings, keyboard-operable project rows, contrast fixes, LTR-forced folder paths, relative dates.
+- Authored entrance animation: aperture rotates open, card + sections cascade in (<0.5s); row stagger, button press feedback, `prefers-reduced-motion` fade-only path (`src/index.css`, `HomeScreen.tsx`).
+
+---
+
 ## [Feature] Lightroom-style Edit UI — 2026-03-02
 
 ### Professional Develop Module (complete Edit tab redesign)

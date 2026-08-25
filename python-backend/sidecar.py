@@ -337,6 +337,10 @@ def handle_delete_edit_settings(params: dict):
     return {"ok": True}
 
 
+def handle_get_edit_settings(params: dict):
+    return {"settings": catalog.get_edit_settings(params["photo_id"])}
+
+
 def handle_get_ai_profile(params: dict):
     profile = catalog.get_ai_profile()
     if profile is None:
@@ -405,6 +409,7 @@ SIMPLE_HANDLERS = {
     "delete_preset": handle_delete_preset,
     "read_xmp_sidecar": handle_read_xmp_sidecar,
     "delete_edit_settings": handle_delete_edit_settings,
+    "get_edit_settings": handle_get_edit_settings,
     "get_ai_profile": handle_get_ai_profile,
     "save_ai_profile": handle_save_ai_profile,
     "personal_model_status": handle_personal_model_status,

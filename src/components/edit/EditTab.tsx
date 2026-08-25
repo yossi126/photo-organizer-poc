@@ -31,6 +31,7 @@ interface EditTabProps {
   canRedo?: (path: string) => boolean;
   onExport?: (entry: PhotoEntry) => void;
   onRevertEdit?: (entry: PhotoEntry) => void;
+  onAutoEditSingle?: (entry: PhotoEntry) => Promise<void>;
 }
 
 const MIN_ZOOM = 0.1;
@@ -59,6 +60,7 @@ export function EditTab({
   canRedo,
   onExport,
   onRevertEdit,
+  onAutoEditSingle,
 }: EditTabProps) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [imageReady, setImageReady] = useState(false);
@@ -66,6 +68,8 @@ export function EditTab({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [showBefore, setShowBefore] = useState(false);
+  const [autoEditBusy, setAutoEditBusy] = useState(false);
+  const [autoEditError, setAutoEditError] = useState<string | null>(null);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const previewRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,6 +83,11 @@ export function EditTab({
   );
 
   const hasEdits = entry ? entry.path in editSettingsMap : false;
+
+  // Clear a stale auto-edit error when switching photos
+  useEffect(() => {
+    setAutoEditError(null);
+  }, [entry?.path]);
 
   // --- Renderer lifecycle ---
   useEffect(() => {
@@ -304,6 +313,39 @@ export function EditTab({
             />
             {!imageReady && (
               <div className="absolute text-zinc-600 text-sm">Loading preview...</div>
+            )}
+
+            {/* Auto Edit for photos without an AI edit (never edited, or reverted) */}
+            {!currentSettings.aiEdited && onAutoEditSingle && (
+              <div
+                className="absolute top-4 right-4 flex items-center gap-1.5"
+                data-testid="auto-edit-single"
+              >
+                {autoEditError && (
+                  <span className="px-2 py-1 rounded-full text-[10px] bg-red-950/90 border border-red-800 text-red-300 backdrop-blur-sm max-w-64 truncate">
+                    {autoEditError}
+                  </span>
+                )}
+                <button
+                  disabled={autoEditBusy}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setAutoEditError(null);
+                    setAutoEditBusy(true);
+                    try {
+                      await onAutoEditSingle(entry);
+                    } catch (err) {
+                      setAutoEditError(String(err));
+                    } finally {
+                      setAutoEditBusy(false);
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-violet-700/90 border border-violet-500 text-white hover:bg-violet-600/90 disabled:opacity-60 disabled:cursor-wait backdrop-blur-sm transition-colors"
+                  title="Auto-edit this photo using your saved AI profile"
+                >
+                  {autoEditBusy ? "✨ Auto-editing…" : "✨ Auto Edit"}
+                </button>
+              </div>
             )}
 
             {/* AI-edited badge + revert */}
