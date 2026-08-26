@@ -254,10 +254,18 @@ export default function App() {
 
   const handleEditSettingsChange = useCallback(
     (path: string, settings: EditSettings) => {
+      // A user-touched photo is no longer a pure AI edit: drop the AI flags so
+      // the Auto-Edit button reappears and the backend records it as a manual
+      // edit (training sample for the personal profile).
+      const { aiEdited: _ai, aiScene: _sc, ...manual } = settings as EditSettings & {
+        aiEdited?: boolean;
+        aiScene?: string;
+      };
+      const next = manual as EditSettings;
       // Seed history with the pre-edit state on the first change of a photo
       history.seed(path, editSettingsMap[path] ?? DEFAULT_EDIT_SETTINGS);
-      setEditSettingsMap((prev) => ({ ...prev, [path]: settings }));
-      persistEditSettings(path, settings);
+      setEditSettingsMap((prev) => ({ ...prev, [path]: next }));
+      persistEditSettings(path, next);
     },
     [persistEditSettings, history, editSettingsMap]
   );

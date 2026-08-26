@@ -44,10 +44,22 @@ MEDIAN_TOL = 0.06        # "already fine" band around the target
 CLIP_LUMA = 0.97         # a pixel counts as newly clipped above this luma
 BASE_BRIGHT = 0.90       # pixels already above this at ev=0 are exempt
 NEW_CLIP_CEIL = 0.01     # allowed share of NEWLY clipped pixels (1%)
-DAMPING = 0.7            # apply only 70% of the solved correction
-DEADBAND = 0.3           # stops — skip micro corrections
+DAMPING = 0.85           # apply 85% of the solved correction
+DEADBAND = 0.15          # stops — skip micro corrections
 FINAL_CLAMP = 1.5        # stops — hard cap on the auto correction
 SOLVE_ITERS = 12         # binary-search iterations (~0.001 stop resolution)
+
+# --- Auto white balance ----------------------------------------------------
+WB_DAMPING = 0.6         # apply 60% of the estimated illuminant correction
+WB_TEMP_CLAMP = 1800.0   # max Kelvin shift from 5500 the auto WB may apply
+WB_TINT_CLAMP = 25.0     # max tint units the auto WB may apply
+WB_NEUTRAL_SAT = 0.20    # only pixels below this saturation count as "gray"
+WB_MIN_NEUTRAL = 0.02    # need >=2% near-neutral pixels for a confident estimate
+WB_MID_LO, WB_MID_HI = 0.15, 0.92  # restrict gray estimate to midtones
+
+# Face-region exposure target (portraits) — brighter than the global 0.45,
+# metered on the face box(es) so a bright background can't leave the face dark.
+FACE_LUMA_TARGET = 0.55
 
 _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 
@@ -93,6 +105,125 @@ def _luma_stats(arr: np.ndarray) -> dict:
     }
 
 
+def _estimate_white_balance(arr: np.ndarray) -> dict:
+    """Estimate a gentle temperature/tint correction from near-neutral midtone
+    pixels (a robust gray-world variant). Returns {} when the frame has too few
+    neutral pixels to trust the estimate.
+
+    Inverts render._stage2_wb_exposure: that stage multiplies the LINEAR image
+    by per-channel gains derived from temperature/tint. To *neutralize* an
+    illuminant we want gains that equalize the mean of near-gray pixels, i.e.
+    gR/gB = meanB/meanR (in linear light). We map that ratio back to a
+    temperature via the same `t` parameter the renderer uses, and the residual
+    green cast to tint. Both are damped and clamped so results stay natural."""
+    lin = np.where(arr <= 0.04045, arr / 12.92,
+                   ((arr + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    L = arr @ _LUMA
+    sat = arr.max(axis=-1) - arr.min(axis=-1)
+
+    # Prefer near-neutral midtone pixels (robust gray-world): filtering to
+    # low-saturation pixels avoids being dragged by a few vivid objects. But a
+    # strong global cast can push EVERY pixel's saturation up, leaving too few
+    # "neutral" ones — then fall back to plain gray-world over midtone pixels
+    # (which still sees the cast) so the correction can fire.
+    mid = (L > WB_MID_LO) & (L < WB_MID_HI)
+    neutral = (sat < WB_NEUTRAL_SAT) & mid
+    if float(neutral.mean()) >= WB_MIN_NEUTRAL:
+        select = neutral
+    elif float(mid.mean()) >= WB_MIN_NEUTRAL:
+        select = mid
+    else:
+        return {}
+
+    px = lin[select]
+    mR = float(px[:, 0].mean()) + 1e-6
+    mG = float(px[:, 1].mean()) + 1e-6
+    mB = float(px[:, 2].mean()) + 1e-6
+
+    # Renderer gains: gR = 2^(0.5 t), gB = 2^(-0.5 t)  =>  gR/gB = 2^t.
+    # We want post-gain R and B means equal: gR*mR = gB*mB  =>  gR/gB = mB/mR.
+    # So  t = log2(mB / mR).
+    t = float(np.log2(mB / mR))
+    # T from t:  t = (1e6/5500 - 1e6/T) / 150  =>  1e6/T = 1e6/5500 - 150 t
+    inv_T = 1e6 / 5500.0 - 150.0 * t
+    T = 1e6 / inv_T if inv_T > 1e-6 else 50000.0
+    temp = float(np.clip(T, 2000.0, 50000.0))
+
+    # Tint: green channel deviation vs the R/B average. gG = 2^(-0.5 tint/150),
+    # want gG * mG = target => tint = 300 * log2(mG / sqrt(mR*mB)).
+    tint = 300.0 * float(np.log2(mG / np.sqrt(mR * mB)))
+
+    # Damp toward neutral (5500 / 0), then clamp the shift magnitude.
+    temp = 5500.0 + WB_DAMPING * (temp - 5500.0)
+    tint = WB_DAMPING * tint
+    temp = float(np.clip(temp, 5500.0 - WB_TEMP_CLAMP, 5500.0 + WB_TEMP_CLAMP))
+    tint = float(np.clip(tint, -WB_TINT_CLAMP, WB_TINT_CLAMP))
+
+    out = {}
+    if abs(temp - 5500.0) >= 60.0:
+        out["temperature"] = int(round(temp / 50.0) * 50)
+    if abs(tint) >= 2.0:
+        out["tint"] = int(round(tint))
+    return out
+
+
+def _tone_from_tails(stats: dict) -> dict:
+    """Content-adaptive highlight/shadow/whites/blacks recovery from the
+    luminance distribution. Scales with how much the photo actually clips —
+    a photo with blown skies gets strong highlight recovery; a flat photo
+    barely touched. Returned values are *seasoning* the caller merges under
+    the scene preset (preset wins only when it asks for MORE recovery)."""
+    p95, p05 = stats["p95"], stats["p05"]
+    hi_blown = max(0.0, p95 - 0.90) / 0.10   # 0 at p95=0.90, 1 at p95>=1.0
+    sh_crush = max(0.0, 0.10 - p05) / 0.10   # 0 at p05=0.10, 1 at p05<=0.0
+    out = {}
+    if hi_blown > 0.05:
+        out["highlights"] = -int(round(min(45.0, 45.0 * hi_blown)))
+        out["whites"] = -int(round(min(20.0, 20.0 * hi_blown)))
+    if sh_crush > 0.05:
+        out["shadows"] = int(round(min(40.0, 40.0 * sh_crush)))
+        out["blacks"] = int(round(min(15.0, 15.0 * sh_crush)))
+    return out
+
+
+def _merge_recovery(settings: dict, recovery: dict) -> None:
+    """Merge tail-based recovery into settings, keeping the stronger correction
+    per field (more negative highlights/whites, more positive shadows/blacks)."""
+    for field in ("highlights", "whites"):
+        if field in recovery:
+            cur = float(settings.get(field, 0) or 0)
+            settings[field] = int(min(cur, recovery[field]))
+    for field in ("shadows", "blacks"):
+        if field in recovery:
+            cur = float(settings.get(field, 0) or 0)
+            settings[field] = int(max(cur, recovery[field]))
+
+
+def _face_median_luma(img: np.ndarray, faces: list) -> float | None:
+    """Median luma over face bounding boxes (bbox normalized [x,y,w,h]).
+    Returns None when no usable face region is present."""
+    if not faces:
+        return None
+    h, w = img.shape[:2]
+    lumas = []
+    for f in faces:
+        bbox = f.get("bbox") if isinstance(f, dict) else f
+        if not bbox or len(bbox) != 4:
+            continue
+        x, y, bw, bh = bbox
+        x0 = int(max(0, min(w - 1, round(x * w))))
+        y0 = int(max(0, min(h - 1, round(y * h))))
+        x1 = int(max(x0 + 1, min(w, round((x + bw) * w))))
+        y1 = int(max(y0 + 1, min(h, round((y + bh) * h))))
+        region = img[y0:y1, x0:x1]
+        if region.size == 0:
+            continue
+        lumas.append(region.reshape(-1, 3) @ _LUMA)
+    if not lumas:
+        return None
+    return float(np.median(np.concatenate(lumas)))
+
+
 def classify_scene(stats: dict, face_count: int) -> str:
     """Deterministic heuristics; precedence: portrait > backlit > low-light > outdoor/indoor."""
     if face_count > 0:
@@ -111,40 +242,67 @@ def classify_scene(stats: dict, face_count: int) -> str:
 
 def compute_auto_settings(img: np.ndarray, face_count: int,
                           scene_presets: dict = None,
-                          normalize_exposure: bool = True) -> dict:
+                          normalize_exposure: bool = True,
+                          faces: list = None) -> dict:
     """Pure function: HxWx3 float32 gamma-sRGB thumbnail -> EditSettings.
 
-    Exposure is solved by simulating the ACTUAL render pipeline (including
-    the preset's tone settings and the highlight shoulder), with a clipping
-    guard, damping and a deadband — see PLAN Fix 3."""
+    Steps: classify scene -> apply per-scene preset -> auto white balance ->
+    content-adaptive tone recovery -> solve exposure by simulating the ACTUAL
+    render pipeline (highlight shoulder included), with a clipping guard,
+    damping and a deadband. Portraits meter exposure on the face region so a
+    bright background can't leave the subject dark."""
     presets = {**DEFAULT_SCENE_PRESETS, **(scene_presets or {})}
     stats = _luma_stats(img)
     scene = classify_scene(stats, face_count)
     settings = dict(presets.get(scene) or {})
 
+    # Auto white balance (skips itself when the estimate is weak).
+    settings.update(_estimate_white_balance(img))
+
+    # Content-adaptive highlight/shadow recovery, merged under the preset.
+    _merge_recovery(settings, _tone_from_tails(stats))
+
+    # Exposure target: portraits meter on the face region; backlit stays None
+    # (its highlight/shadow recovery does the work). Everything else global.
     target = SCENE_LUMA_TARGETS[scene]
-    if normalize_exposure and target is not None:
+    metric = "median"
+    face_target = None
+    if scene == "portrait":
+        face_med = _face_median_luma(img, faces)
+        if face_med is not None:
+            face_target = FACE_LUMA_TARGET
+            metric = "face"
+
+    if normalize_exposure and (target is not None or face_target is not None):
+        eff_target = face_target if face_target is not None else target
         preset_exp = float(settings.get("exposure", 0) or 0)
 
-        def sim_luma(ev: float) -> np.ndarray:
-            out = render.apply_edit_settings(img, {**settings, "exposure": preset_exp + ev})
-            return out @ _LUMA
+        target = eff_target
 
-        base_luma = sim_luma(0.0)
-        med0 = float(np.median(base_luma))
+        def sim(ev: float):
+            """Render at this ev; return (metric_luma, new_clip_fraction).
+            metric_luma is the face-region median for portraits, else global
+            median; the clip guard is always measured globally."""
+            out = render.apply_edit_settings(img, {**settings, "exposure": preset_exp + ev})
+            luma = out @ _LUMA
+            if metric == "face":
+                fm = _face_median_luma(out, faces)
+                m = fm if fm is not None else float(np.median(luma))
+            else:
+                m = float(np.median(luma))
+            new_clip = float((luma[base_ok] > CLIP_LUMA).mean()) if base_ok.any() else 0.0
+            return m, new_clip
+
         # Pixels already (nearly) clipped at baseline — e.g. street lights,
         # specular highlights — are exempt from the clip guard; we only limit
         # NEW clipping introduced by the exposure push.
+        base_luma = render.apply_edit_settings(img, {**settings, "exposure": preset_exp}) @ _LUMA
         base_ok = base_luma <= BASE_BRIGHT
-
-        def sim(ev: float):
-            luma = sim_luma(ev)
-            new_clip = float((luma[base_ok] > CLIP_LUMA).mean()) if base_ok.any() else 0.0
-            return float(np.median(luma)), new_clip
+        med0, _c0 = sim(0.0)
 
         ev_sol = 0.0
         if abs(med0 - target) > MEDIAN_TOL:
-            # Binary search: median(ev) is monotone increasing in ev
+            # Binary search: metric(ev) is monotone increasing in ev
             lo, hi = -SOLVE_RANGE, SOLVE_RANGE
             for _ in range(SOLVE_ITERS):
                 mid = (lo + hi) / 2.0
@@ -236,7 +394,9 @@ def run_auto_edit(
             progress_callback(i + 1, total, f"Auto-editing: {photo['filename']}")
 
         try:
-            thumb = thumbs.get_thumbnail_bytes(photo["path"], 300)
+            # 512px analysis thumb: enough resolution for WB neutral-pixel
+            # detection and face-region metering. Personal model uses the same.
+            thumb = thumbs.get_thumbnail_bytes(photo["path"], 512)
             pil = Image.open(BytesIO(thumb))
 
             settings = None
@@ -249,11 +409,12 @@ def run_auto_edit(
                 scene_counts["personal"] += 1
             else:
                 arr = np.asarray(pil.convert("RGB"), dtype=np.float32) / 255.0
-                face_count = len(catalog.get_face_results(photo_id))
+                faces = catalog.get_face_results(photo_id)
                 settings = compute_auto_settings(
-                    arr, face_count,
+                    arr, len(faces),
                     scene_presets=scene_presets,
                     normalize_exposure=normalize_exposure,
+                    faces=faces,
                 )
                 scene_counts[settings["aiScene"]] += 1
 

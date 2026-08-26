@@ -356,9 +356,15 @@ export function EditTab({
               >
                 <span
                   className="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-violet-700/90 border border-violet-500 text-white backdrop-blur-sm"
-                  title={`Auto-edited (scene: ${currentSettings.aiScene ?? "?"})`}
+                  title={
+                    currentSettings.aiScene === "personal"
+                      ? "Edited in your learned personal style"
+                      : `Auto-edited (scene: ${currentSettings.aiScene ?? "?"})`
+                  }
                 >
-                  ✨ AI{currentSettings.aiScene ? ` · ${currentSettings.aiScene}` : ""}
+                  {currentSettings.aiScene === "personal"
+                    ? "🧠 My Style"
+                    : `✨ AI${currentSettings.aiScene ? ` · ${currentSettings.aiScene}` : ""}`}
                 </span>
                 {onRevertEdit && (
                   <button

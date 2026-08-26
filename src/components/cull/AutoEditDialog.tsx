@@ -38,6 +38,8 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
   const [result, setResult] = useState<AutoEditResult | null>(null);
   const [errorText, setErrorText] = useState("");
   const [modelStatus, setModelStatus] = useState<PersonalModelStatus | null>(null);
+  // "standard" = scene-based engine; "personal" = the user's learned profile.
+  const [mode, setMode] = useState<"standard" | "personal">("standard");
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -50,8 +52,20 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
         setErrorText(String(err));
         setPhase("error");
       });
-    personalModelStatus().then(setModelStatus).catch(() => {});
+    personalModelStatus()
+      .then((s) => {
+        setModelStatus(s);
+        // Default to My Style once the personal model is trained and good
+        // enough, matching how Aftershoot/Imagen default to the personal
+        // profile — but the choice stays visible and switchable.
+        if (s.available && s.usable) setMode("personal");
+      })
+      .catch(() => {});
   }, []);
+
+  const personalReady = !!(modelStatus?.available && modelStatus.usable);
+  const samplesCollected = modelStatus?.trainingSamples ?? 0;
+  const MIN_SAMPLES = 50;
 
   const start = useCallback(async () => {
     if (!config) return;
@@ -66,7 +80,11 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
       const preset = userPresets.find((p) => String(p.id) === presetId);
       if (preset) scenePresets[scene] = preset.settings;
     }
-    const finalConfig: AiProfileConfig = { ...config, scenePresets };
+    const finalConfig: AiProfileConfig = {
+      ...config,
+      scenePresets,
+      usePersonalModel: mode === "personal",
+    };
 
     try {
       saveAiProfile(finalConfig).catch(() => {});
@@ -92,7 +110,7 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
     } finally {
       abortRef.current = null;
     }
-  }, [config, sceneChoice, userPresets, projectId, photos, onDone]);
+  }, [config, sceneChoice, userPresets, projectId, photos, onDone, mode]);
 
   const pct =
     progress && progress.total > 0
@@ -110,12 +128,57 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
 
         {phase === "configure" && config && (
           <div className="space-y-4">
-            {modelStatus?.available && modelStatus.usable && (
-              <div className="px-3 py-2 rounded-lg bg-violet-950/40 border border-violet-800 text-xs text-violet-200">
-                🧠 Personal AI model is active — it predicts the full edit per photo
-                (scene presets below are the fallback).
-              </div>
+            {/* Standard vs My Style selector */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setMode("standard")}
+                aria-pressed={mode === "standard"}
+                className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                  mode === "standard"
+                    ? "bg-blue-950/50 border-blue-600 text-blue-100"
+                    : "bg-zinc-800/60 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                <div className="text-sm font-medium">Standard</div>
+                <div className="text-[10px] opacity-70 mt-0.5">
+                  Scene-based, general best
+                </div>
+              </button>
+              <button
+                onClick={() => personalReady && setMode("personal")}
+                disabled={!personalReady}
+                aria-pressed={mode === "personal"}
+                title={
+                  personalReady
+                    ? "Edit in your learned style"
+                    : "Learns from your edits — train a profile first"
+                }
+                className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                  mode === "personal"
+                    ? "bg-violet-950/50 border-violet-600 text-violet-100"
+                    : personalReady
+                      ? "bg-zinc-800/60 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                      : "bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed"
+                }`}
+              >
+                <div className="text-sm font-medium">🧠 My Style</div>
+                <div className="text-[10px] opacity-70 mt-0.5">
+                  {personalReady
+                    ? "Your learned profile"
+                    : samplesCollected >= MIN_SAMPLES
+                      ? "Trained model below quality bar"
+                      : `${samplesCollected}/${MIN_SAMPLES} edits collected`}
+                </div>
+              </button>
+            </div>
+
+            {mode === "personal" && (
+              <p className="text-xs text-violet-300/80">
+                Predicts the full edit per photo from your learned style. Scene
+                settings below are the per-photo fallback when the model is unsure.
+              </p>
             )}
+
             <div className="space-y-2">
               {SCENES.map((scene) => (
                 <div key={scene.key} className="flex items-center gap-2">
@@ -169,9 +232,14 @@ export function AutoEditDialog({ projectId, photos, onClose, onDone }: AutoEditD
             <div className="flex gap-3 pt-1">
               <button
                 onClick={start}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white"
+                className={`flex-1 py-2.5 rounded-lg text-sm font-medium text-white ${
+                  mode === "personal"
+                    ? "bg-violet-700 hover:bg-violet-600"
+                    : "bg-blue-600 hover:bg-blue-500"
+                }`}
               >
-                Auto-Edit {photos.length} photo{photos.length === 1 ? "" : "s"}
+                {mode === "personal" ? "Edit in My Style" : "Auto-Edit"}{" "}
+                {photos.length} photo{photos.length === 1 ? "" : "s"}
               </button>
               <button
                 onClick={onClose}

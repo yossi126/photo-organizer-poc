@@ -195,6 +195,7 @@ interface MockCatalog {
   photos: Record<number, PhotoEntry[]>; // project id -> entries
   editSettings: Record<number, EditSettings>; // photo id -> settings
   presets?: { id: number; name: string; settings: Partial<EditSettings> }[];
+  trainingSamplePhotos?: number[]; // photo ids captured as in-app training samples
 }
 
 const MOCK_STORE_KEY = "photo-organizer-mock-catalog";
@@ -336,7 +337,15 @@ function handleMockRequest(
       break;
     }
     case "set_edit_settings": {
-      cat.editSettings[params.photo_id as number] = params.settings as EditSettings;
+      const pid = params.photo_id as number;
+      const s = params.settings as EditSettings & { aiEdited?: boolean };
+      cat.editSettings[pid] = s;
+      // Mirror the backend: a manual (non-AI) edit becomes a training sample.
+      if (!s.aiEdited) {
+        const set = new Set(cat.trainingSamplePhotos ?? []);
+        set.add(pid);
+        cat.trainingSamplePhotos = Array.from(set);
+      }
       saveMockCatalog(cat);
       onMessage({ id, result: { ok: true } });
       break;
@@ -449,12 +458,23 @@ function handleMockRequest(
       }
       break;
     }
-    case "personal_model_status":
+    case "personal_model_status": {
+      // Mock: pretend a usable model exists once enough in-app edits are
+      // collected, so the Standard/My Style flow is exercisable in browser mode.
+      const nSamples = (cat.trainingSamplePhotos ?? []).length;
+      const trained = nSamples >= 50;
       onMessage({
         id,
-        result: { available: false, samples: 0 },
+        result: {
+          available: trained,
+          usable: trained,
+          valLoss: trained ? 0.018 : undefined,
+          samples: trained ? nSamples : undefined,
+          trainingSamples: nSamples,
+        },
       });
       break;
+    }
     case "clear_training_data":
       onMessage({ id, result: { ok: true } });
       break;

@@ -157,16 +157,78 @@ for name, img, expected_scene in CASES:
     clip_new = float((luma_out[base_ok] > 0.97).mean()) if base_ok.any() else 0.0
     check(clip_new <= 0.02, f"{name}: new highlight clipping bounded", f"(new clip {clip_new:.4f})")
 
-    # Color preservation vs identity render
-    s_id = sat_mean(identity)
+    # Color preservation: measure against a WB-matched baseline so a
+    # legitimate white-balance correction (which changes chroma by design)
+    # isn't misread as color washing. The check targets the tone/HSV stages.
+    wb_only = {k: settings[k] for k in ("temperature", "tint") if k in settings}
+    baseline = render.apply_edit_settings(img, wb_only) if wb_only else identity
+    s_base = sat_mean(baseline)
     s_out = sat_mean(out)
-    check(s_out >= 0.85 * s_id,
-          f"{name}: saturation preserved", f"(identity {s_id:.3f} out {s_out:.3f})")
+    check(s_out >= 0.85 * s_base,
+          f"{name}: saturation preserved", f"(baseline {s_base:.3f} out {s_out:.3f})")
 
 # Daylight is already correct — deadband must leave exposure at 0
 day_settings = auto_edit.compute_auto_settings(make_daylight(), face_count=0)
 check(float(day_settings.get("exposure", 0) or 0) == 0.0,
       "daylight: exposure untouched (deadband)", str(day_settings.get("exposure")))
+
+
+# --- Auto white balance ----------------------------------------------------
+# A strong warm (tungsten-like) cast must pull temperature BELOW 5500 to
+# neutralize it; a strong cool cast must pull it ABOVE.
+def _flat_gray(rgb):
+    img = np.full((H, W, 3), rgb, dtype=np.float32)
+    img += rng.normal(0, 0.01, img.shape).astype(np.float32)
+    return np.clip(img, 0, 1)
+
+
+warm = _flat_gray([0.55, 0.45, 0.32])   # orange cast
+warm_wb = auto_edit._estimate_white_balance(warm)
+check(warm_wb.get("temperature", 5500) < 5400,
+      "warm cast: temperature lowered", str(warm_wb))
+
+cool = _flat_gray([0.35, 0.45, 0.60])   # blue cast
+cool_wb = auto_edit._estimate_white_balance(cool)
+check(cool_wb.get("temperature", 5500) > 5600,
+      "cool cast: temperature raised", str(cool_wb))
+
+# A neutral gray frame must not trigger a meaningful WB shift.
+neutral = _flat_gray([0.45, 0.45, 0.45])
+neutral_wb = auto_edit._estimate_white_balance(neutral)
+check(abs(neutral_wb.get("temperature", 5500) - 5500) <= 200
+      and abs(neutral_wb.get("tint", 0)) <= 4,
+      "neutral gray: WB left alone", str(neutral_wb))
+
+
+# --- Face-weighted exposure (portrait) -------------------------------------
+# Dark face against a bright background: global median is high, so global
+# metering would leave the face dark. Face metering must brighten it.
+def make_backlit_portrait():
+    img = np.full((H, W, 3), 0.82, dtype=np.float32)   # bright background
+    img += rng.normal(0, 0.01, img.shape).astype(np.float32)
+    # dark face in the center
+    img[70:130, 120:180] = [0.16, 0.13, 0.12]
+    return np.clip(img, 0, 1)
+
+
+face_bbox = [{"bbox": [120 / W, 70 / H, 60 / W, 60 / H]}]
+portrait = make_backlit_portrait()
+face_region = portrait[70:130, 120:180].reshape(-1, 3) @ LUMA
+face_med_in = float(np.median(face_region))
+
+# Without faces (global metering): a bright frame gets little/no push.
+s_global = auto_edit.compute_auto_settings(portrait, face_count=0)
+# With a face: portrait scene, face metered up toward FACE_LUMA_TARGET.
+s_face = auto_edit.compute_auto_settings(portrait, face_count=1, faces=face_bbox)
+check(s_face["aiScene"] == "portrait", "portrait: scene = portrait", s_face["aiScene"])
+ev_face = float(s_face.get("exposure", 0) or 0)
+check(ev_face > 0.2, "portrait: face metering brightens", f"(exposure {ev_face})")
+
+out_face = render.apply_edit_settings(portrait, s_face)
+face_med_out = float(np.median(out_face[70:130, 120:180].reshape(-1, 3) @ LUMA))
+check(face_med_out > face_med_in + 0.05,
+      "portrait: face region actually lifted",
+      f"({face_med_in:.3f} -> {face_med_out:.3f})")
 
 print()
 if failed:

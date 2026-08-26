@@ -126,6 +126,43 @@ def ingest_training_data(folders: list, progress_callback=None, cancel_event=Non
     }
 
 
+def capture_edit_sample(photo_id: int) -> bool:
+    """Record a manual in-app edit as a training sample (image features +
+    the sliders the user set). Called after the user adjusts a photo in the
+    Edit tab, so the personal profile can learn from work done inside the app
+    — no Lightroom XMP export required.
+
+    Returns True when a sample was stored. Silently no-ops (returns False) on
+    any problem — this must never break the edit-save path. Safe to call
+    repeatedly for the same photo: source_path is UNIQUE, so re-edits update
+    the existing sample rather than duplicating it (catalog.add_training_sample
+    uses INSERT ... ON CONFLICT)."""
+    try:
+        photo = catalog.get_photo(photo_id)
+        if photo is None:
+            return False
+        settings = catalog.get_edit_settings(photo_id)
+        if not settings:
+            return False
+        # Only learn from human edits; AI-written settings are not demonstrations
+        # of the user's taste. (The frontend strips aiEdited on manual change,
+        # but guard here too.)
+        if settings.get("aiEdited"):
+            return False
+
+        targets, mask = features.encode_targets(settings)
+        if mask.sum() == 0:
+            return False  # nothing trainable was set (e.g. only crop/rating)
+
+        feat = features.extract_features(_thumb_for_features(photo["path"]), photo["path"])
+        catalog.add_training_sample(
+            photo["path"], feat.tobytes(), targets.tobytes(), mask.tobytes()
+        )
+        return True
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------

@@ -93,10 +93,21 @@ export function TrainingDialog({ onClose }: TrainingDialogProps) {
       <div className="w-[520px] bg-zinc-900 rounded-2xl p-6 shadow-2xl border border-zinc-700">
         <h2 className="text-lg font-semibold text-zinc-100 mb-1">🧠 Personal AI Profile</h2>
         <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
-          Learns YOUR editing style from past work: point it at folders of shoots that contain
-          photos with Lightroom <span className="font-mono text-zinc-400">.xmp</span> sidecars.
-          Minimum 50 pairs to train; 500–5,000 recommended for real accuracy.
+          Learns YOUR editing style. It trains on two sources: the photos you edit right here in
+          the app, and (optionally) folders of past shoots with Lightroom{" "}
+          <span className="font-mono text-zinc-400">.xmp</span> sidecars. Minimum 50 edits to
+          train; 500–5,000 recommended for real accuracy.
         </p>
+
+        {(status?.trainingSamples ?? 0) > 0 && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700 text-xs text-zinc-300">
+            {status!.trainingSamples} edit{status!.trainingSamples === 1 ? "" : "s"} collected so
+            far{" "}
+            {(status?.trainingSamples ?? 0) >= 50
+              ? "— enough to train."
+              : `— ${50 - (status?.trainingSamples ?? 0)} more to reach the 50 minimum.`}
+          </div>
+        )}
 
         {status?.available && phase === "intro" && (
           <div className="mb-4 px-3 py-2 rounded-lg bg-violet-950/40 border border-violet-800 text-xs text-violet-200">

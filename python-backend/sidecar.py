@@ -144,7 +144,20 @@ def handle_list_photos(params: dict):
 
 
 def handle_set_edit_settings(params: dict):
-    catalog.set_edit_settings(params["photo_id"], params["settings"])
+    photo_id = params["photo_id"]
+    settings = params["settings"]
+    catalog.set_edit_settings(photo_id, settings)
+    # Capture manual edits as personal-profile training samples, in the
+    # background so slider saves stay responsive. AI-written settings carry
+    # aiEdited and are skipped inside capture_edit_sample.
+    if not settings.get("aiEdited"):
+        def _capture():
+            try:
+                import training
+                training.capture_edit_sample(photo_id)
+            except Exception:
+                pass
+        EXECUTOR.submit(_capture)
     return {"ok": True}
 
 

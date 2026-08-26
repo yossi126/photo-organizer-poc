@@ -4,6 +4,49 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Feature] Auto-Edit quality + personal editing profile — 2026-08-26
+
+Rebuilt Auto-Edit quality and made the app learn each user's editing style from the edits
+they make in the app, then choose Standard vs their learned style at Auto-Edit time
+(the Aftershoot/Imagen model). The personal profile is machine learning — a small MLP that
+maps image features to develop-slider values.
+
+### Auto-Edit quality (scene-based path)
+
+Previously: scene → fixed preset → exposure-only solve. Now adds real per-photo correction.
+
+| File | Changes |
+|---|---|
+| `python-backend/auto_edit.py` | **Auto white balance** (robust gray-world, inverts the renderer's temp/tint model, damped + clamped); **face-weighted exposure** (portraits meter the solver on the face bbox, not the global median); **content-adaptive tone recovery** (highlights/shadows/whites/blacks scaled by measured clipping); solver tuning (damping 0.7→0.85, deadband 0.3→0.15, analysis thumb 300→512px) |
+
+### Learn from in-app edits
+
+| File | Changes |
+|---|---|
+| `python-backend/training.py` | `capture_edit_sample(photo_id)` — a manual edit becomes/updates a training sample (features + sliders set); skips AI-written and no-slider edits; UNIQUE path means re-edits update, not duplicate |
+| `python-backend/sidecar.py` | `handle_set_edit_settings` captures the sample in the background (non-blocking) |
+| `src/App.tsx` | `handleEditSettingsChange` strips `aiEdited`/`aiScene` on manual change, so the edit records as a genuine demonstration and the Auto-Edit button reappears |
+| `src/components/home/TrainingDialog.tsx` | Two data sources (in-app edits + optional XMP folders); "N edits collected" progress; trains with zero folders once ≥50 in-app edits exist |
+
+### Standard vs My Style
+
+| File | Changes |
+|---|---|
+| `src/components/cull/AutoEditDialog.tsx` | Standard / My Style selector; My Style disabled with "N/50 edits collected" hint until a trained, guard-passing model exists, then defaults to it (choice stays switchable) |
+| `src/components/edit/EditTab.tsx` | Edit badge shows "🧠 My Style" for personal-model edits |
+| `src/lib/sidecar.ts` | Mock: tracks in-app sample count, reports a usable model once ≥50 samples, so the flow is exercisable in browser mode |
+
+### Tests
+
+- `test_auto_edit_realism.py` extended with white-balance and face-metering cases (27 checks).
+- `test_edit_capture.py` (new) — in-app edits become training samples, re-edits update, AI/no-slider edits skipped (14 checks).
+- `test_personal_learning.py` (new) — end-to-end proof the model learns a synthetic style from 90 in-app edits and reproduces it on held-out photos (7 checks).
+- Full backend suite green: 27 realism + 14 edit-capture + 7 personal-learning + 18 parity + 37 XMP.
+
+Plan: `docs/plans/personal-editing-profile/plan.md`.
+
+---
+
 ## [Feature] Single-image Auto Edit + home screen refresh — 2026-08-24
 
 ### Single-image Auto Edit (Develop view)
