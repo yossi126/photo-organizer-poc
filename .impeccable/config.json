@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/home/HomeScreen.tsx"
+        ],
+        "createdAt": "2026-08-24T18:21:27.225Z",
+        "reason": "Claude verified: flagged gray classes are disabled/base-state variants; the colored backgrounds (blue-600, red-950) only co-occur with white/red text in the same state"
+      }
+    ]
+  }
+}
